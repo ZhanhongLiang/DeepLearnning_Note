@@ -117,6 +117,165 @@ plt.show()
 
 > np.power是矩阵的幂函数用法
 
+## 1.3` Pyhton装饰器`
+
+>由于函数也是一个对象，而且函数对象可以被赋值给变量，所以，通过变量也能调用该函数
+
+[python 装饰器的作用](https://liaoxuefeng.com/books/python/functional/decorator/index.html)
+
+#### `带参数的装饰器`
+
+>`如果decorator本身需要传入参数,那就需要编写一个返回decorator的高阶函数,写出来会更复杂`
+
+```python
+def log(text):
+    def decorator(func):
+        def wrapper(*args, **kw):
+            print('%s %s():' % (text, func.__name__))
+            return func(*args, **kw)
+        return wrapper
+    return decorator
+
+@log('execute')
+def now():
+    print('2024-6-1')
+now()
+```
+
+>我们来剖析上面的语句，首先执行`log('execute')`，返回的是`decorator`函数，再调用返回的函数，参数是`now`函数，返回值最终是`wrapper`函数。
+>
+>以上两种decorator的定义都没有问题，但还差最后一步。因为我们讲了函数也是对象，它有`__name__`等属性，但你去看经过decorator装饰之后的函数，它们的`__name__`已经从原来的`'now'`变成了`'wrapper'`：
+
+```
+>>> now.__name__
+'wrapper'
+```
+
+>因为返回的那个`wrapper()`函数名字就是`'wrapper'`，所以，需要把原始函数的`__name__`等属性复制到`wrapper()`函数中，否则，有些依赖函数签名的代码执行就会出错。
+
+#### 案例判断
+
+- 判断以下代码,这个代码是BERT里面LoadingSingleClassion.py摘抄的
+
+```python
+    
+   # 这个是python装饰器
+   # 在 data_process上面定义了@process_cache(unique_key=["max_sen_len"])
+   # 定义了一个带process_cache带参数的装饰器函数
+def process_cache(unique_key=None):
+    """
+    数据预处理结果缓存修饰器
+    :param : unique_key
+    :return:
+    """
+    if unique_key is None:
+        raise ValueError(
+            "unique_key 不能为空, 请指定相关数据集构造类的成员变量，如['top_k', 'cut_words', 'max_sen_len']")
+    def decorating_function(func):
+        def wrapper(*args, **kwargs):
+            logging.info(f" ## 索引预处理缓存文件的参数为：{unique_key}")
+            obj = args[0]  # 获取类对象，因为data_process(self, file_path=None)中的第1个参数为self
+            file_path = kwargs['file_path'] # 相当于多参数,获取名字为file_paht的参数
+            file_dir = f"{os.sep}".join(file_path.split(os.sep)[:-1])
+            file_name = "".join(file_path.split(os.sep)[-1].split('.')[:-1])
+            paras = f"cache_{file_name}_"
+            for k in unique_key:
+                paras += f"{k}{obj.__dict__[k]}_"  # 遍历对象中的所有参数
+            cache_path = os.path.join(file_dir, paras[:-1] + '.pt')
+            start_time = time.time()
+            # 如果不存在.pt文件，也就是处理的文件模型
+            # 这里就是装饰器强大之处,如果不存在cache_train_max_sen_lenNone.pt文件
+            # 需要执行data=func(*args,**kwargs),生成这个模型
+            if not os.path.exists(cache_path):
+                logging.info(f"缓存文件 {cache_path} 不存在，重新处理并缓存！")
+                data = func(*args, **kwargs)
+                # 这里是'wb'是write bin的意思,就是以二进制形式写入
+                with open(cache_path, 'wb') as f:
+                    torch.save(data, f)
+            else:
+                logging.info(f"缓存文件 {cache_path} 存在，直接载入缓存文件！")
+                with open(cache_path, 'rb') as f:
+                    data = torch.load(f)
+            end_time = time.time()
+            logging.info(f"数据预处理一共耗时{(end_time - start_time):.3f}s")
+            return data
+
+        return wrapper
+
+    return decorating_function
+    
+    
+    """
+    tqdm库，用于显示python库训练的进度
+    只是一个三方库
+    """
+    # data_process()相当于调用了
+    # data_process = process_cache(unique_key=["max_sen_len"])(data_process)
+    # 相当于首先执行了process_cache(unique_key=["max_sen_len"]),返回的是decorating_function函数
+    # 再调用返回的函数,参数是data_process(self, file_path=None),返回值是wrapper函数
+    # 也就是最后data_process指向了wrapper函数
+    @process_cache(unique_key=["max_sen_len"])
+    def data_process(self, file_path=None):
+        """
+        将每一句话中的每一个词根据字典转换成索引的形式，同时返回所有样本中最长样本的长度
+        :param file_path: 数据集路径
+        :return:
+        """
+        # open函数
+        # 且调用readlines()函数
+        # 调用readline()可以每次读取一行内容，调用readlines()一次读取所有内容并按行返回list。因此，要根据需要决定怎么调用。
+        raw_iter = open(file_path, encoding="utf8").readlines()
+        data = []
+        max_len = 0
+        # tqdm库，就是按照
+        for raw in tqdm(raw_iter, ncols=80):
+            # 取得文本和标签
+            line = raw.rstrip("\n").split(self.split_sep)
+            s, l = line[0], line[1]
+            # python的迭代器,在最前面加上分类标志位[CLS]
+            tmp = [self.CLS_IDX] + [self.vocab[token] for token in self.tokenizer(s)]
+            # 用来对Token序列进行截取，最长为max_position_embeddings个字符,默认为512
+            if len(tmp) > self.max_position_embeddings - 1:
+                tmp = tmp[:self.max_position_embeddings - 1]  # BERT预训练模型只取前512个字符
+            # 在末尾处添加上[SEP]符号
+            tmp += [self.SEP_IDX]
+            # 将tmp转化为张量
+            tensor_ = torch.tensor(tmp, dtype=torch.long)
+            # 将标签转化为张量
+            l = torch.tensor(int(l), dtype=torch.long)
+            # 保存最长序列的长度
+            max_len = max(max_len, tensor_.size(0))
+            # 将文本张量和标签张量添加到data里面
+            data.append((tensor_, l))
+        return data, max_len
+```
+
+>参照这篇文章 [Python装饰器执行顺序](https://kingname.info/2023/04/16/order-of-decorator/)
+>
+>`执行顺序:process(unique_key=["max_sen_len"])(data_process)`
+>
+>看代码逻辑,
+>
+>```python
+>            # 如果不存在.pt文件，也就是处理的文件模型
+>            # 这里就是装饰器强大之处,如果不存在cache_train_max_sen_lenNone.pt文件
+>            # 需要执行data=func(*args,**kwargs),生成这个模型
+>            if not os.path.exists(cache_path):
+>                logging.info(f"缓存文件 {cache_path} 不存在，重新处理并缓存！")
+>                data = func(*args, **kwargs)
+>                # 这里是'wb'是write bin的意思,就是以二进制形式写入
+>                with open(cache_path, 'wb') as f:
+>                    torch.save(data, f)
+>            else
+>```
+>
+>`这里的func(*args,**kwargs)就是调用了data_process函数`
+>
+>`这里的*args就是self,**kwargs就是多参数,file_path = kwargs['file_path'] # 相当于多参数,获取名字为file_paht的参数，这句话的意思就是获取kwargs['files_path']里面是'files_path'名字的值`,
+>最后torch.save(data,f),`data是data_process返回的参数赋予给data`
+>
+>然后以二进制的形式写成.pt格式
+
 
 
 # Pytorch+anaconda 配置
@@ -132,8 +291,6 @@ conda create -n 环境名 --clone base
 ```
 conda activate 环境名
 ```
-
-
 
 
 
@@ -278,6 +435,261 @@ print(c.shape)
 
 ```
 size([3,2])
+```
+
+### 3.2 `view`
+
+>`view`用法很重要，必须掌握这个用法
+>
+>参考这篇文章
+>
+>[view()用法](https://www.cnblogs.com/zhangxuegold/p/17504649.html)
+
+### 函数简介
+
+>Pytorch中的view函数主要用于Tensor维度的重构，即返回一个有相同数据但不同维度的Tensor。
+>
+>根据上面的描述可知，view函数的操作对象应该是Tensor类型。如果不是Tensor类型，可以通过`tensor = torch.tensor(data)`来转换。
+
+#### 普通用法 (手动调整size)
+
+>`view(参数a,参数b,…)`，其中，总的参数个数表示将张量重构后的维度。
+>
+>`view()`相当于`reshape`、`resize`，重新调整Tensor的形状。
+
+```python
+import torch
+a1 = torch.arange(0,16)
+print(a1) # tensor([ 0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15])
+
+a2 = a1.view(8, 2) # 将a1的维度改为8*2
+a3 = a1.view(2, 8) # 将a1的维度改为2*8
+a4 = a1.view(4, 4) # 将a1的维度改为4*4
+
+# a5 = a1.view(2,2,1,4)
+# 更多的维度也没有问题，只要保证维度改变前后的元素个数相同就行,即 2*2*1*4=16。
+
+print(a2)
+print(a3)
+print(a4)
+```
+
+```
+tensor([[ 0,  1],
+        [ 2,  3],
+        [ 4,  5],
+        [ 6,  7],
+        [ 8,  9],
+        [10, 11],
+        [12, 13],
+        [14, 15]])
+tensor([[ 0,  1,  2,  3,  4,  5,  6,  7],
+        [ 8,  9, 10, 11, 12, 13, 14, 15]])
+tensor([[ 0,  1,  2,  3],
+        [ 4,  5,  6,  7],
+        [ 8,  9, 10, 11],
+        [12, 13, 14, 15]])
+```
+
+#### 特殊用法(自动调节size)
+
+>`view(参数a,参数b,…)`中一个参数定为-1，代表自动调整这个维度上的元素个数，则表示该维度取决于其它维度，由Pytorch自己补充，以保证元素的总数不变。
+
+```python
+import torch
+a1 = torch.arange(0,16)
+print(a1) # tensor([ 0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15]
+a2 = a1.view(-1, 16)
+a3 = a1.view(-1, 8)
+a4 = a1.view(-1, 4)
+a5 = a1.view(-1, 2)
+a6 = a1.view(4*4, -1)
+a7 = a1.view(1*4, -1)
+a8 = a1.view(2*4, -1)
+
+print(a2)
+print(a3)
+print(a4)
+print(a5)
+print(a6)
+print(a7)
+print(a8)
+```
+
+```
+tensor([[ 0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15]])
+tensor([[ 0,  1,  2,  3,  4,  5,  6,  7],
+        [ 8,  9, 10, 11, 12, 13, 14, 15]])
+tensor([[ 0,  1,  2,  3],
+        [ 4,  5,  6,  7],
+        [ 8,  9, 10, 11],
+        [12, 13, 14, 15]])
+tensor([[ 0,  1],
+        [ 2,  3],
+        [ 4,  5],
+        [ 6,  7],
+        [ 8,  9],
+        [10, 11],
+        [12, 13],
+        [14, 15]])
+tensor([[ 0],
+        [ 1],
+        [ 2],
+        [ 3],
+        [ 4],
+        [ 5],
+        [ 6],
+        [ 7],
+        [ 8],
+        [ 9],
+        [10],
+        [11],
+        [12],
+        [13],
+        [14],
+        [15]])
+tensor([[ 0,  1,  2,  3],
+        [ 4,  5,  6,  7],
+        [ 8,  9, 10, 11],
+        [12, 13, 14, 15]])
+tensor([[ 0,  1],
+        [ 2,  3],
+        [ 4,  5],
+        [ 6,  7],
+        [ 8,  9],
+        [10, 11],
+        [12, 13],
+        [14, 15]])
+```
+
+>`view(-1)`表示将Tensor转为一维Tensor。
+
+```python
+a9 = a1.view(-1)
+
+print(a1)
+print(a9) # 因此，转变后还是一维，没什么变换
+tensor([ 0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15])
+tensor([ 0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15])
+```
+
+到此这篇关于pytorch中的 .view()函数的用法介绍的文章就介绍到这了,更多相关pytorch .view()函数内容请去pytorch官网文档查看。
+
+### 3.3 `masked_fill()函数`
+
+**1. 函数形式**
+
+```python
+torch.Tensor.masked_fill(mask, value)
+```
+
+>**2. 函数功能**
+>输入的mask*m**a**s**k*需要与当前的基础Tensor的形状一致。
+>将mask*m**a**s**k*中为True的元素对应的基础Tensor的元素设置为值value*v**a**l**u**e*。
+>
+>**3. 函数参数**
+>
+>- **mask**：mask既可以是int型Tensor（值为0或者1）也可以是bool型Tensor（值为False或者True）
+>- **value**：float，填充的值
+>
+>**4. 函数返回值**
+>返回填充后的Tensor
+
+>下面一个简单的例子说明masked_fill函数的使用，首先我们创建一个4x4的一个基础矩阵，然后创建一个4x4的对角矩阵，然后根据对角矩阵将对角线上的基础机矩阵的值全部设置为100，具体的代码如下所示。
+
+```python
+import torch
+
+if __name__ == '__main__':
+    tensor = torch.arange(0,16).view(4,4)
+    print('origin tensor:\n{}\n'.format(tensor))
+
+    mask = torch.eye(4,dtype=torch.bool)
+    print('mask tensor:\n{}\n'.format(mask))
+
+    tensor = tensor.masked_fill(mask,100)
+    print('filled tensor:\n{}'.format(tensor))
+
+```
+
+```
+origin tensor:
+tensor([[ 0,  1,  2,  3],
+        [ 4,  5,  6,  7],
+        [ 8,  9, 10, 11],
+        [12, 13, 14, 15]])
+
+mask tensor:
+tensor([[ True, False, False, False],
+        [False,  True, False, False],
+        [False, False,  True, False],
+        [False, False, False,  True]])
+
+filled tensor:
+tensor([[100,   1,   2,   3],
+        [  4, 100,   6,   7],
+        [  8,   9, 100,  11],
+        [ 12,  13,  14, 100]])
+
+```
+
+### 3.4  `cat()`
+
+>一般`torch.cat()`是为了把多个`tensor`进行拼接而存在的。实际使用中，和`torch.stack()`使用场景不同：参考链接[torch.stack()](https://blog.csdn.net/xinjieyuan/article/details/105205326)，但是本文主要说`cat()`。
+>
+>`torch.cat()` 和`python`中的内置函数`cat()`， 在使用和目的上，是没有区别的，区别在于前者操作对象是`tensor`。
+>
+>cat()
+>
+>函数目的： 在给定维度上对输入的张量序列seq 进行连接操作。
+>
+>outputs = torch.cat(inputs, dim=?) → Tensor
+>  1.参数
+>
+>​         inputs : 待连接的张量序列，可以是任意相同Tensor类型的python 序列
+>​         dim : 选择的扩维, 必须在0到len(inputs[0])之间，沿着此维连接张量序列。
+>
+>2. 重点
+>输入数据必须是序列，序列中数据是任意相同的shape的同类型tensor
+>维度不可以超过输入数据的任一个张量的维度
+
+```python
+import torch
+
+x1 = torch.tensor([[11,21,31],[21,31,41]],dtype=torch.int)
+# x1.shape # torch.Size([2, 3])
+# x2
+x2 = torch.tensor([[12,22,32],[22,32,42]],dtype=torch.int)
+
+# x2.shape  # torch.Size([2, 3])
+
+inputs = [x1,x2]
+print(inputs)
+
+output = torch.cat(inputs,dim=0)
+print(output)
+print(output.shape) # shape [4,3]
+
+output = torch.cat(inputs,dim=1)
+print(output)
+print(output.shape) # shape [2,6]
+
+# output = torch.cat(inputs,dim=2)
+
+```
+
+```
+[tensor([[11, 21, 31],
+        [21, 31, 41]], dtype=torch.int32), tensor([[12, 22, 32],
+        [22, 32, 42]], dtype=torch.int32)]
+tensor([[11, 21, 31],
+        [21, 31, 41],
+        [12, 22, 32],
+        [22, 32, 42]], dtype=torch.int32)
+torch.Size([4, 3])
+tensor([[11, 21, 31, 12, 22, 32],
+        [21, 31, 41, 22, 32, 42]], dtype=torch.int32)
+torch.Size([2, 6])
 ```
 
 ## 4.torch.nn
@@ -514,7 +926,7 @@ $$
 $$
 \text{MSE} = \frac{1}{n} \sum_{i=1}^{n} (y_i - \hat{y}_i)^2
 $$
-- 
+-
 $$
   y_i 是第 i 个目标值（真实值）。
 $$
@@ -526,7 +938,7 @@ $$
 
 - n  是样本的总数。
 
-### 代码示例
+- 代码示例
 
 ```python
 import torch
@@ -544,7 +956,7 @@ loss = criterion(predicted, target)
 print(loss)
 ```
 
-### 解释
+- 解释
 
 - **用途**：`MSELoss` 通常用于回归任务中，在这种任务中，模型预测的是连续值而非类别。MSE 计算预测值和真实值之间的误差并对其平方，因此更关注大的误差，因为平方会放大它们的影响。
 - **优势**：简单且易于解释，损失值越小，预测值与目标值越接近。
@@ -552,6 +964,6 @@ print(loss)
 
 `MSELoss` 是构建回归模型时的重要组成部分，通常与优化器（如 SGD 或 Adam）一起使用，以最小化模型在训练集上的误差。
 
+### linear
 
-
-# 
+>参考这篇文章[linear用法及原理](https://blog.csdn.net/zhaohongfei_358/article/details/122797190)
